@@ -23,6 +23,7 @@ type Store struct{ db *sql.DB }
 type Message struct {
 	ID        int64
 	Blob      []byte
+	From 	  []byte
 	CreatedAt int64
 }
 
@@ -43,6 +44,7 @@ func OpenStore(path string) (*Store, error) {
 		CREATE TABLE IF NOT EXISTS messages (
 			id 			INTEGER PRIMARY KEY AUTOINCREMENT,
 			recipient	BLOB NOT NULL,
+			sender 		BLOB NOT NULL,
 			blob		BLOB NOT NULL,
 			created_at	INTEGER NOT NULL
 		);
@@ -57,10 +59,10 @@ func OpenStore(path string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-func (s *Store) Save(recipient, blob []byte) (int64, error) {
+func (s *Store) Save(recipient, senderPubKey, blob []byte) (int64, error) {
 	res, err := s.db.Exec(`
-		INSERT INTO messages (recipient, blob, created_at) VALUES (?, ?, ?)
-	`, recipient, blob, time.Now().Unix())
+		INSERT INTO messages (recipient, sender, blob, created_at) VALUES (?, ?, ?, ?)
+	`, recipient, senderPubKey, blob, time.Now().Unix())
 	if err != nil {
 		return 0, err
 	}
@@ -75,7 +77,7 @@ func (s *Store) Pending(recipient []byte) ([]Message, error) {
 	msgs := make([]Message, 0)
 
 	rows, err := s.db.Query(`
-		SELECT id, blob, created_at FROM messages WHERE recipient = ? ORDER BY id
+		SELECT id, sender, blob, created_at FROM messages WHERE recipient = ? ORDER BY id
 	`, recipient)
 
 	if err != nil {
@@ -86,7 +88,7 @@ func (s *Store) Pending(recipient []byte) ([]Message, error) {
 
 	for rows.Next() {
 		var m Message
-		err := rows.Scan(&m.ID, &m.Blob, &m.CreatedAt)
+		err := rows.Scan(&m.ID, &m.From, &m.Blob, &m.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
