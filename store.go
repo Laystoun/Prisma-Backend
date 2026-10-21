@@ -57,14 +57,18 @@ func OpenStore(path string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-func (s *Store) Save(recipient, blob []byte) error {
-	_, err := s.db.Exec(`
+func (s *Store) Save(recipient, blob []byte) (int64, error) {
+	res, err := s.db.Exec(`
 		INSERT INTO messages (recipient, blob, created_at) VALUES (?, ?, ?)
 	`, recipient, blob, time.Now().Unix())
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return nil
+	msgId, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	return msgId, nil
 }
 
 func (s *Store) Pending(recipient []byte) ([]Message, error) {
