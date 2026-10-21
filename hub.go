@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"sync"
+	"time"
 
 	"github.com/coder/websocket"
 )
@@ -29,4 +31,36 @@ func NewHub(db *Store) *Hub {
         conns: make(map[string]*websocket.Conn),
         db:    db,
     }
+}
+
+func (h* Hub) Deliver(from, to, blob []byte) error {
+	id, err := h.db.Save(to, from, blob)
+	if err != nil {
+		return err
+	}
+
+	h.mutex.Lock()
+	conn, ok := h.conns[string(to)]
+	h.mutex.Unlock()
+
+	if !ok {
+		return nil
+	}
+
+	srvrDeliver := ServerDeliver{
+		Type: SERVER_DELIVER,
+		MessageId: id,
+		From: from,
+		Blob: blob,
+	}
+
+	decodeDeliverBytes, err := Encode(srvrDeliver)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	
+	conn.Write(ctx, websocket.MessageText, decodeDeliverBytes)
+	return nil
 }
