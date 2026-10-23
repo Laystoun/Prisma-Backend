@@ -88,6 +88,7 @@ func handleWS(hub *Hub) http.HandlerFunc {
 						conn.Close(websocket.StatusInternalError, "internal error")
 						return
 					}
+					log.Printf("send: from=%x to=%x size=%d", pubKey[:4], m.To[:4], len(m.Blob))
 				case ClientAck:
 					err := hub.db.Delete(m.MessageId, pubKey)
 					if err != nil {
