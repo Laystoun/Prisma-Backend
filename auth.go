@@ -8,7 +8,9 @@ import (
 func NewChallenge() ([]byte, error) {
 	b := make([]byte, 32)
 	_, err := rand.Read(b)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return b, nil
 }
 
