@@ -21,10 +21,12 @@ func (h* Hub) Register(pubKey []byte, conn *websocket.Conn) {
 	h.conns[string(pubKey)] = conn
 }
 
-func (h* Hub) Unregister(pubKey []byte) {
+func (h* Hub) Unregister(pubKey []byte, conn *websocket.Conn) {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
-	delete(h.conns, string(pubKey))
+	if h.conns[string(pubKey)] == conn {
+		delete(h.conns, string(pubKey))
+	}
 }
 
 func NewHub(db *Store) *Hub {
