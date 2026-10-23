@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 
@@ -47,20 +48,42 @@ func (h* Hub) Deliver(from, to, blob []byte) error {
 		return nil
 	}
 
+	if err := sendDeliver(conn, id, from, blob); err != nil {
+		log.Printf("deliver to online client failed: %s", err)
+	}
+	return nil
+}
+
+func sendDeliver(conn *websocket.Conn, msgId int64, from, blob []byte) error {
 	srvrDeliver := ServerDeliver{
 		Type: SERVER_DELIVER,
-		MessageId: id,
+		MessageId: msgId,
 		From: from,
 		Blob: blob,
 	}
 
-	decodeDeliverBytes, err := Encode(srvrDeliver)
+	srvrDeliverJson, err := Encode(srvrDeliver)
 	if err != nil {
 		return err
 	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	
-	conn.Write(ctx, websocket.MessageText, decodeDeliverBytes)
+	return conn.Write(ctx, websocket.MessageText, srvrDeliverJson)
+}
+
+func (h* Hub) SendPending(pubKey []byte, conn *websocket.Conn) error {
+	msgs, err := h.db.Pending(pubKey)
+	if err != nil {
+		return err
+	}
+
+	for _, message := range msgs {
+		err := sendDeliver(conn, message.ID, message.From, message.Blob)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
