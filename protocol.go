@@ -14,6 +14,7 @@ const CLIENT_HELLO = "hello"
 const CLIENT_AUTH = "auth"
 const CLIENT_SEND = "send"
 const CLIENT_ACK = "ack"
+const CLIENT_PUSH_TOKEN = "push_token"
 
 const SERVER_CHALLENGE = "challenge"
 const SERVER_OK = "ok"
@@ -39,6 +40,11 @@ type ClientSend struct {
 type ClientAck struct {
 	Type string 	`json:"type"`
 	MessageId int64 `json:"message_id"`
+}
+
+type ClientPushToken struct {
+	Type string 	`json:"type"`
+	Token string 	`json:"token"`
 }
 
 type ServerChallenge struct { 
@@ -101,6 +107,12 @@ func Decode(data []byte) (any, error) {
 				return nil, err
 			}
 			return clAck, nil
+		case CLIENT_PUSH_TOKEN:
+			var clPushToken ClientPushToken
+			if err := json.Unmarshal(data, &clPushToken); err != nil {
+				return nil, err
+			}
+			return clPushToken, nil
 		default:
 			return nil, fmt.Errorf("unknown type: %s", msgType.Type)
 	}
