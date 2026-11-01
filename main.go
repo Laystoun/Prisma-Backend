@@ -10,11 +10,14 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"golang.org/x/time/rate"
 )
 
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	dbPath := flag.String("db", "database.db", "path to sqlite file")
+	fcmEnabled := flag.Bool("fcm", false, "Enable Firebase Cloud Messaging")
+
 	flag.Parse()
 	
 	store, err := OpenStore(*dbPath)
@@ -22,13 +25,22 @@ func main() {
 		log.Fatal(err)
 	}
 
-	hub := NewHub(store)
+	var pusher *Pusher
+
+	if *fcmEnabled {
+		pusher, err = NewPusher("./fcm.json")
+		if err != nil {
+			log.Fatalf("Pusher initialization failed: %v", err)
+		}
+	}
+
+	hub := NewHub(store, pusher)
 	http.HandleFunc("/ws", handleWS(hub))
 
 	go func() {
 		ticker := time.NewTicker(time.Hour)
 		for range ticker.C {
-			err := store.DeleteOlderThan(30 * 24 * time.Hour)
+			err := store.DeleteOlderThan(7 * 24 * time.Hour)
 			if err != nil {
 				log.Printf("cleanup error: %s", err)
 			}
@@ -45,7 +57,7 @@ func handleWS(hub *Hub) http.HandlerFunc {
 			return
 		}
 		defer conn.CloseNow()
-		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
 		pubKey, err := authenticate(ctx, conn)
@@ -53,6 +65,8 @@ func handleWS(hub *Hub) http.HandlerFunc {
 			return
 		}
 		cancel()
+
+		limiter := rate.NewLimiter(5, 20)
 
 		hub.Register(pubKey, conn)
 		defer hub.Unregister(pubKey, conn)
@@ -78,6 +92,11 @@ func handleWS(hub *Hub) http.HandlerFunc {
 
 			switch m := msg.(type) {
 				case ClientSend:
+					if !limiter.Allow() {
+						conn.Close(websocket.StatusPolicyViolation, "rate limit exceeded")
+						return
+					}
+					
 					if len(m.To) != ed25519.PublicKeySize {
 						conn.Close(websocket.StatusPolicyViolation, "wrong size recipient")
 						return
@@ -96,6 +115,20 @@ func handleWS(hub *Hub) http.HandlerFunc {
 						conn.Close(websocket.StatusInternalError, "internal error")
 						return
 					}
+				case ClientPushToken:
+					if len(m.Token) > 4096 || len(m.Token) == 0 {
+						conn.Close(websocket.StatusPolicyViolation, "wrong size Token")
+						return
+					}
+					err := hub.db.SaveToken(pubKey, m.Token)
+
+					if err != nil {
+						conn.Close(websocket.StatusInternalError, "internal error")
+						log.Printf("[main.go] Save token error: %s", err)
+						return
+					}
+
+					log.Printf("push token saved: %x", pubKey[:4])
 				default:
 					conn.Close(websocket.StatusPolicyViolation, "unexpected message")
 					return

@@ -49,6 +49,12 @@ func OpenStore(path string) (*Store, error) {
 			created_at	INTEGER NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS idx_messages_recipient ON messages(recipient);
+
+		CREATE TABLE IF NOT EXISTS push_tokens (
+			pubKey BLOB PRIMARY KEY,
+			token TEXT NOT NULL,
+			updated_at INTEGER
+		)
 	`)
 
 	if err != nil {
@@ -57,6 +63,52 @@ func OpenStore(path string) (*Store, error) {
 	}
 
 	return &Store{db: db}, nil
+}
+
+func (s *Store) SaveToken(pubKey []byte, token string) error {
+	_, err := s.db.Exec(`
+		INSERT INTO push_tokens (pubKey, token, updated_at) 
+		VALUES (?, ?, ?)
+		ON CONFLICT (pubKey) 
+		DO UPDATE SET 
+			token = EXCLUDED.token, 
+			updated_at = EXCLUDED.updated_at
+	`, pubKey, token, time.Now().Unix())
+	
+	if err != nil { 
+		return err 
+	}
+
+	return nil
+}
+
+func (s *Store) GetToken(pubKey []byte) (string, error) {
+	row, err := s.db.Query(`
+		SELECT token FROM push_tokens WHERE pubKey = ?
+	`, (pubKey))
+	if err != nil { return "", err }
+	defer row.Close()
+
+	var token string
+	if row.Next() {
+		err = row.Scan(&token)
+		if err != nil {
+			return "", err
+		}
+
+		return token, nil
+	}
+
+	return "", nil
+}
+
+func (s *Store) DeleteToken(token string) error {
+	_, err := s.db.Exec(
+		"DELETE FROM push_tokens WHERE token = ?", token,
+	)
+
+	if err != nil { return err }
+	return nil
 }
 
 func (s *Store) Save(recipient, senderPubKey, blob []byte) (int64, error) {
@@ -125,4 +177,22 @@ func (s *Store) Close() error {
 	err := s.db.Close()
 	if err != nil { return err }
 	return nil
+}
+
+func (s *Store) CountMessages(pubKey []byte, sender []byte) (int, error) {
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM messages WHERE recipient = ? AND sender = ?`, pubKey, sender).Scan(&count)
+	if err != nil { return 0, err }
+	return count, nil
+}
+
+func (s *Store) CountInbox(recipient []byte) (int, error) {
+	var count int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM messages WHERE recipient = ?`, recipient,
+	).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
 }

@@ -6,13 +6,16 @@ import (
 	"sync"
 	"time"
 
+	"firebase.google.com/go/v4/messaging"
 	"github.com/coder/websocket"
 )
 
+/*struct for conns and deliver msgs*/
 type Hub struct {
 	mutex 	sync.Mutex
 	conns 	map[string]*websocket.Conn
 	db 		*Store
+	pusher  *Pusher
 }
 
 func (h* Hub) Register(pubKey []byte, conn *websocket.Conn) {
@@ -29,14 +32,64 @@ func (h* Hub) Unregister(pubKey []byte, conn *websocket.Conn) {
 	}
 }
 
-func NewHub(db *Store) *Hub {
+func (h* Hub) Wake(to []byte) {
+	if h.pusher == nil {
+		return
+	}
+	token, err := h.db.GetToken(to)
+	if err != nil {
+		log.Printf("[hub.go] Wake() error - GetToken return err: %s", err)
+		return
+	}
+
+	if h.pusher == nil || token == "" { return }
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		10*time.Second,
+	)
+	
+	go func(ctx context.Context) {
+		err := h.pusher.Send(ctx, token)
+		defer cancel()
+		if err != nil {
+			if messaging.IsUnregistered(err) {
+				err := h.db.DeleteToken(token)
+				if err != nil { log.Printf("[hub.go] Wake() error delete token: %s", err) }
+				return
+			}
+			log.Printf("FCM Send error: %v", err)
+		}
+	}(ctx)
+}
+
+func NewHub(db *Store, pusher *Pusher) *Hub {
     return &Hub{
         conns: make(map[string]*websocket.Conn),
         db:    db,
+		pusher: pusher,
     }
 }
 
-func (h* Hub) Deliver(from, to, blob []byte) error {
+func (h *Hub) Deliver(from, to, blob []byte) error {
+	fromSender, err := h.db.CountMessages(to, from)
+	if err != nil {
+		return err
+	}
+	if fromSender >= 50 {
+		log.Printf("limit per sender: from=%x to=%x", from[:4], to[:4])
+		return nil
+	}
+
+	total, err := h.db.CountInbox(to)
+	if err != nil {
+		return err
+	}
+	if total >= 500 {
+		log.Printf("inbox full: to=%x", to[:4])
+		return nil
+	}
+
 	id, err := h.db.Save(to, from, blob)
 	if err != nil {
 		return err
@@ -47,11 +100,13 @@ func (h* Hub) Deliver(from, to, blob []byte) error {
 	h.mutex.Unlock()
 
 	if !ok {
+		h.Wake(to)
 		return nil
 	}
 
 	if err := sendDeliver(conn, id, from, blob); err != nil {
 		log.Printf("deliver to online client failed: %s", err)
+		h.Wake(to)
 	}
 	return nil
 }
