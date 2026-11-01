@@ -37,19 +37,11 @@ type ClientSend struct {
 	Blob []byte 	`json:"blob"`
 }
 
-/*
-{"type":"send", "to":"q+H1GQmZaRForNbmLH1ydq2PzB9aFU4OuYnoMrPQ8pQ=", "blob":"Hello"}
-*/
-
 type ClientAck struct {
 	Type string 	`json:"type"`
 	MessageId int64 `json:"message_id"`
 }
-/*
-{"type": "hello", "pub_key":"I4GFRZlXOIPNoEe6rmlJy2LVAKQ/s/a89AH9B0EjaiQ="}
 
-{"type":"auth", "sign":""}
-*/
 type ClientPushToken struct {
 	Type string 	`json:"type"`
 	Token string 	`json:"token"`

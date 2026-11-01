@@ -7,18 +7,6 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-/*
-type Store struct { db *sql.DB }
-type Message struct { ID int64; Blob []byte; CreatedAt int64 }
-
-func OpenStore(path string) (*Store, error)
-func (s *Store) Save(recipient, blob []byte) error
-func (s *Store) Pending(recipient []byte) ([]Message, error)
-func (s *Store) Delete(id int64, recipient []byte) error
-func (s *Store) DeleteOlderThan(ttl time.Duration) error
-func (s *Store) Close() error
-*/
-
 type Store struct{ db *sql.DB }
 type Message struct {
 	ID        int64
