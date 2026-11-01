@@ -47,6 +47,13 @@ func main() {
 		}
 	}()
 
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		for range ticker.C {
+			quota.Reset()
+		}
+	}()
+
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }
 
@@ -57,6 +64,9 @@ func handleWS(hub *Hub) http.HandlerFunc {
 			return
 		}
 		defer conn.CloseNow()
+
+		ip := clientIP(r)
+
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
@@ -101,6 +111,18 @@ func handleWS(hub *Hub) http.HandlerFunc {
 						conn.Close(websocket.StatusPolicyViolation, "wrong size recipient")
 						return
 					}
+
+					if len(m.Blob) > 9*1024 {
+						conn.Close(websocket.StatusPolicyViolation, "message too big")
+						return
+					}
+
+					if !quota.Allow(ip, int64(len(m.Blob))+256) {
+						log.Printf("quota exceeded: ip=%s", ip)
+						conn.Close(websocket.StatusPolicyViolation, "quota exceeded")
+						return
+					}
+
 					err := hub.Deliver(pubKey, m.To, m.Blob)
 					if err != nil {
 						log.Printf("Deliver error: %s", err)
