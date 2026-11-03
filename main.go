@@ -37,7 +37,13 @@ func main() {
 	hub := NewHub(store, pusher)
 	http.HandleFunc("/ws", handleWS(hub))
 	http.HandleFunc("/update", updateCheck())
-	http.HandleFunc("/apk/", apkDownload())
+	
+	http.Handle("/apk/",
+		http.StripPrefix(
+			"/apk/",
+			http.FileServer(http.Dir("./apk")),
+		),
+	)
 
 	go func() {
 		ticker := time.NewTicker(time.Hour)
@@ -63,12 +69,6 @@ func updateCheck() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		http.ServeFile(w, r, "./apk/update.json")
-	}
-}
-
-func apkDownload() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		http.Handle("/apk/", http.StripPrefix("/apk/", http.FileServer(http.Dir("./apk"))))
 	}
 }
 
