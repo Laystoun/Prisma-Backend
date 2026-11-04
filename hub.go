@@ -12,7 +12,7 @@ import (
 
 /*struct for conns and deliver msgs*/
 type Hub struct {
-	mutex 	sync.Mutex
+	mutex 	sync.RWMutex
 	conns 	map[string]*websocket.Conn
 	db 		*Store
 	pusher  *Pusher
@@ -30,6 +30,14 @@ func (h* Hub) Unregister(pubKey []byte, conn *websocket.Conn) {
 	if h.conns[string(pubKey)] == conn {
 		delete(h.conns, string(pubKey))
 	}
+}
+
+func (h *Hub) IsOnline(pubKey []byte) bool {
+    h.mutex.RLock()
+    defer h.mutex.RUnlock()
+
+    _, ok := h.conns[string(pubKey)]
+    return ok
 }
 
 func (h* Hub) Wake(to []byte) {
