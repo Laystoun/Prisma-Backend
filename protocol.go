@@ -5,21 +5,18 @@ import (
 	"fmt"
 )
 
-/*
-от клиента: hello, auth, send, ack
-от сервера: challenge, ok, error, deliver
-*/
-
 const CLIENT_HELLO = "hello"
 const CLIENT_AUTH = "auth"
 const CLIENT_SEND = "send"
 const CLIENT_ACK = "ack"
 const CLIENT_PUSH_TOKEN = "push_token"
+const CLIENT_STATUS_REQUEST = "client_status_request"
 
 const SERVER_CHALLENGE = "challenge"
 const SERVER_OK = "ok"
 const SERVER_ERROR = "error"
 const SERVER_DELIVER = "deliver"
+const SERVER_STATUS_RESPONSE = "server_status_response"
 
 type ClientHello struct { 
 	Type string 	`json:"type"`
@@ -47,6 +44,11 @@ type ClientPushToken struct {
 	Token string 	`json:"token"`
 }
 
+type ClientStatusRequest struct {
+	Type string 	`json:"type"`
+	PubKey []byte 	`json:"pub_key"`
+}
+
 type ServerChallenge struct { 
 	Type string		`json:"type"`
 	Nonce []byte 	`json:"nonce"`
@@ -66,6 +68,12 @@ type ServerDeliver struct {
 	MessageId int64 	`json:"message_id"`
 	From []byte 		`json:"from"`
 	Blob []byte 		`json:"blob"`
+}
+
+type ServerStatusResponce struct {
+	Type string 	`json:"type"`
+	PubKey []byte 	`json:"pub_key"`
+	Status bool 	`json:"online"`
 }
 
 type MessageType struct {
@@ -113,6 +121,12 @@ func Decode(data []byte) (any, error) {
 				return nil, err
 			}
 			return clPushToken, nil
+		case CLIENT_STATUS_REQUEST:
+			var clStatusRequest ClientStatusRequest
+			if err := json.Unmarshal(data, &clStatusRequest); err != nil {
+				return nil, err
+			}
+			return clStatusRequest, nil
 		default:
 			return nil, fmt.Errorf("unknown type: %s", msgType.Type)
 	}
