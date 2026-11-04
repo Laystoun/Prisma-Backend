@@ -166,6 +166,33 @@ func handleWS(hub *Hub) http.HandlerFunc {
 					}
 
 					log.Printf("push token saved: %x", pubKey[:4])
+				case ClientStatusRequest:
+					online := hub.IsOnline(m.PubKey)
+
+					result := ServerStatusResponce{
+						Type: SERVER_STATUS_RESPONSE,
+						PubKey: m.PubKey,
+						Status: online,
+					}
+
+					data, err := Encode(result)
+					if err != nil {
+						log.Printf("Status encode error: %s", err)
+						conn.Close(websocket.StatusInternalError, "internal error")
+						return
+					}
+
+					statusCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+					defer cancel()
+
+					err = conn.Write(statusCtx, websocket.MessageText, data)
+
+					if err != nil {
+						log.Printf("Status write error: %s", err)
+						conn.Close(websocket.StatusInternalError, "internal error")
+						return
+					}
+					
 				default:
 					conn.Close(websocket.StatusPolicyViolation, "unexpected message")
 					return
