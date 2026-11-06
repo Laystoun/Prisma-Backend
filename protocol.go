@@ -32,6 +32,7 @@ type ClientSend struct {
 	Type string 	`json:"type"`
 	To []byte 		`json:"to"`
 	Blob []byte 	`json:"blob"`
+	SendAt int64 	`json:"send_at"`
 }
 
 type ClientAck struct {
@@ -68,6 +69,7 @@ type ServerDeliver struct {
 	MessageId int64 	`json:"message_id"`
 	From []byte 		`json:"from"`
 	Blob []byte 		`json:"blob"`
+	SendAt int64 		`json:"send_at"`
 }
 
 type ServerStatusResponce struct {
