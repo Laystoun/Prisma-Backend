@@ -99,10 +99,10 @@ func (s *Store) DeleteToken(token string) error {
 	return nil
 }
 
-func (s *Store) Save(recipient, senderPubKey, blob []byte) (int64, error) {
+func (s *Store) Save(recipient, senderPubKey, blob []byte, send_at int64) (int64, error) {
 	res, err := s.db.Exec(`
 		INSERT INTO messages (recipient, sender, blob, created_at) VALUES (?, ?, ?, ?)
-	`, recipient, senderPubKey, blob, time.Now().Unix())
+	`, recipient, senderPubKey, blob, send_at)
 	if err != nil {
 		return 0, err
 	}
