@@ -79,7 +79,7 @@ func NewHub(db *Store, pusher *Pusher) *Hub {
     }
 }
 
-func (h *Hub) Deliver(from, to, blob []byte) error {
+func (h *Hub) Deliver(from, to, blob []byte, send_at int64) error {
 	fromSender, err := h.db.CountMessages(to, from)
 	if err != nil {
 		return err
@@ -98,7 +98,7 @@ func (h *Hub) Deliver(from, to, blob []byte) error {
 		return nil
 	}
 
-	id, err := h.db.Save(to, from, blob)
+	id, err := h.db.Save(to, from, blob, send_at)
 	if err != nil {
 		return err
 	}
@@ -112,19 +112,20 @@ func (h *Hub) Deliver(from, to, blob []byte) error {
 		return nil
 	}
 
-	if err := sendDeliver(conn, id, from, blob); err != nil {
+	if err := sendDeliver(conn, id, from, blob, send_at); err != nil {
 		log.Printf("deliver to online client failed: %s", err)
 		h.Wake(to)
 	}
 	return nil
 }
 
-func sendDeliver(conn *websocket.Conn, msgId int64, from, blob []byte) error {
+func sendDeliver(conn *websocket.Conn, msgId int64, from, blob []byte, send_at int64) error {
 	srvrDeliver := ServerDeliver{
 		Type: SERVER_DELIVER,
 		MessageId: msgId,
 		From: from,
 		Blob: blob,
+		SendAt: send_at,
 	}
 
 	srvrDeliverJson, err := Encode(srvrDeliver)
@@ -144,7 +145,7 @@ func (h* Hub) SendPending(pubKey []byte, conn *websocket.Conn) error {
 	}
 
 	for _, message := range msgs {
-		err := sendDeliver(conn, message.ID, message.From, message.Blob)
+		err := sendDeliver(conn, message.ID, message.From, message.Blob, message.CreatedAt)
 		if err != nil {
 			return err
 		}
