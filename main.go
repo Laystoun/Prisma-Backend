@@ -138,7 +138,7 @@ func handleWS(hub *Hub) http.HandlerFunc {
 						return
 					}
 
-					err := hub.Deliver(pubKey, m.To, m.Blob)
+					err := hub.Deliver(pubKey, m.To, m.Blob, m.SendAt)
 					if err != nil {
 						log.Printf("Deliver error: %s", err)
 						conn.Close(websocket.StatusInternalError, "internal error")
