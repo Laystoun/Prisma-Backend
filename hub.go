@@ -5,6 +5,7 @@ import (
 	"log"
 	"sync"
 	"time"
+	"fmt"
 
 	"firebase.google.com/go/v4/messaging"
 	"github.com/coder/websocket"
@@ -38,6 +39,14 @@ func (h *Hub) IsOnline(pubKey []byte) bool {
 
     _, ok := h.conns[string(pubKey)]
     return ok
+}
+
+func (h *Hub) getWsConnection(pubKey []byte) (*websocket.Conn, bool) {
+    h.mutex.RLock()
+    defer h.mutex.RUnlock()
+
+    conn, ok := h.conns[string(pubKey)]
+    return conn, ok
 }
 
 func (h* Hub) Wake(to []byte) {
@@ -79,7 +88,7 @@ func NewHub(db *Store, pusher *Pusher) *Hub {
     }
 }
 
-func (h *Hub) Deliver(from, to, blob []byte, send_at int64) error {
+func (h *Hub) Deliver(from, to, blob []byte, send_at int64, clientMessageId string) error {
 	fromSender, err := h.db.CountMessages(to, from)
 	if err != nil {
 		return err
@@ -98,7 +107,7 @@ func (h *Hub) Deliver(from, to, blob []byte, send_at int64) error {
 		return nil
 	}
 
-	id, err := h.db.Save(to, from, blob, send_at)
+	id, err := h.db.Save(to, from, blob, send_at, clientMessageId)
 	if err != nil {
 		return err
 	}
@@ -112,20 +121,21 @@ func (h *Hub) Deliver(from, to, blob []byte, send_at int64) error {
 		return nil
 	}
 
-	if err := sendDeliver(conn, id, from, blob, send_at); err != nil {
+	if err := sendDeliver(conn, id, from, blob, send_at, clientMessageId); err != nil {
 		log.Printf("deliver to online client failed: %s", err)
 		h.Wake(to)
 	}
 	return nil
 }
 
-func sendDeliver(conn *websocket.Conn, msgId int64, from, blob []byte, send_at int64) error {
+func sendDeliver(conn *websocket.Conn, msgId int64, from, blob []byte, send_at int64, clientMessageId string) error {
 	srvrDeliver := ServerDeliver{
 		Type: SERVER_DELIVER,
 		MessageId: msgId,
 		From: from,
 		Blob: blob,
 		SendAt: send_at,
+		ClientMessageId: clientMessageId,
 	}
 
 	srvrDeliverJson, err := Encode(srvrDeliver)
@@ -145,11 +155,55 @@ func (h* Hub) SendPending(pubKey []byte, conn *websocket.Conn) error {
 	}
 
 	for _, message := range msgs {
-		err := sendDeliver(conn, message.ID, message.From, message.Blob, message.CreatedAt)
+		err := sendDeliver(conn, message.ID, message.From, message.Blob, message.CreatedAt, message.ClientMessageId)
 		if err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func (h *Hub) SendPendingEvent(recipient []byte, conn *websocket.Conn) error {
+    events, err := h.db.GetPendingEvents(recipient)
+    if err != nil {
+        return err
+    }
+
+    for _, event := range events {
+        var serverEvent ServerEvent
+
+        switch event.eventType {
+			case EventDeleteMessage:
+				serverEvent = ServerEvent{
+					Type:      SERVER_EVENT,
+					RequestID: event.request_id,
+					From:      event.sender,
+					EventType: event.eventType,
+					Payload:   event.payload,
+				}
+
+			default:
+				return fmt.Errorf("unknown pending event type: %s", event.eventType)
+        }
+
+        data, err := Encode(serverEvent)
+        if err != nil {
+            return err
+        }
+
+        ctx, cancel := context.WithTimeout(
+            context.Background(),
+            5*time.Second,
+        )
+
+        err = conn.Write(ctx, websocket.MessageText, data)
+        cancel()
+
+        if err != nil {
+            return err
+        }
+    }
+
+    return nil
 }
