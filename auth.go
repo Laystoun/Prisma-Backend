@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/hex"
 )
 
 func NewChallenge() ([]byte, error) {
@@ -19,4 +20,14 @@ func VerifySignature(pubKey, nonce, sig []byte) bool {
 		return false
 	}
 	return ed25519.Verify(pubKey, nonce, sig)
+}
+
+func GenerateRequestID() (string, error) {
+    bytes := make([]byte, 16)
+
+    if _, err := rand.Read(bytes); err != nil {
+        return "", err
+    }
+
+    return hex.EncodeToString(bytes), nil
 }
