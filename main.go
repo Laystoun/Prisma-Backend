@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+	"encoding/hex"
+	"encoding/json"
 
 	"github.com/coder/websocket"
 	"golang.org/x/time/rate"
@@ -47,10 +49,17 @@ func main() {
 
 	go func() {
 		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+
 		for range ticker.C {
-			err := store.DeleteOlderThan(7 * 24 * time.Hour)
-			if err != nil {
-				log.Printf("cleanup error: %s", err)
+			ttl := 7 * 24 * time.Hour
+
+			if err := store.DeleteOlderThan(ttl); err != nil {
+				log.Printf("messages cleanup error: %s", err)
+			}
+
+			if err := store.DeletePendingEventsOlderThan(ttl); err != nil {
+				log.Printf("events cleanup error: %s", err)
 			}
 		}
 	}()
@@ -95,10 +104,17 @@ func handleWS(hub *Hub) http.HandlerFunc {
 
 		hub.Register(pubKey, conn)
 		defer hub.Unregister(pubKey, conn)
+
 		err = hub.SendPending(pubKey, conn)
-		
 		if err != nil {
 			log.Printf("pending messages error: %s", err)
+			conn.Close(websocket.StatusInternalError, "internal error")
+			return
+		}
+
+		err = hub.SendPendingEvent(pubKey, conn)
+		if err != nil {
+			log.Printf("pending events error: %s", err)
 			conn.Close(websocket.StatusInternalError, "internal error")
 			return
 		}
@@ -138,7 +154,7 @@ func handleWS(hub *Hub) http.HandlerFunc {
 						return
 					}
 
-					err := hub.Deliver(pubKey, m.To, m.Blob, m.SendAt)
+					err := hub.Deliver(pubKey, m.To, m.Blob, m.SendAt, m.ClientMessageId)
 					if err != nil {
 						log.Printf("Deliver error: %s", err)
 						conn.Close(websocket.StatusInternalError, "internal error")
@@ -192,7 +208,132 @@ func handleWS(hub *Hub) http.HandlerFunc {
 						conn.Close(websocket.StatusInternalError, "internal error")
 						return
 					}
-					
+				case ClientDeleteMessage:
+					if !limiter.Allow() {
+						conn.Close(websocket.StatusPolicyViolation, "rate limit exceeded")
+						return
+					}
+
+					requestId, err := GenerateRequestID()
+					if err != nil {
+						conn.Close(websocket.StatusInternalError, "internal error")
+						return
+					}
+
+					if len(m.To) != ed25519.PublicKeySize {
+						conn.Close(websocket.StatusPolicyViolation, "wrong size recipient")
+						return
+					}
+
+					if len(m.Payload) == 0 || len(m.Payload) > 8192 {
+						conn.Close(websocket.StatusPolicyViolation, "invalid payload size")
+						return
+					}
+
+					var payload DeleteMessagePayload
+
+					if err := json.Unmarshal(m.Payload, &payload); err != nil {
+						conn.Close(websocket.StatusPolicyViolation, "invalid payload")
+						return
+					}
+
+					if len(payload.ClientMessageIDs) == 0 ||
+					len(payload.ClientMessageIDs) > 100 {
+						conn.Close(websocket.StatusPolicyViolation, "invalid message ids")
+						return
+					}
+
+					for _, id := range payload.ClientMessageIDs {
+						if len(id) != 32 {
+							conn.Close(websocket.StatusPolicyViolation, "invalid client message id")
+							return
+						}
+
+						if _, err := hex.DecodeString(id); err != nil {
+							conn.Close(websocket.StatusPolicyViolation, "invalid client message id")
+							return
+						}
+					}
+
+
+					if !quota.Allow(ip, int64(len(m.Payload))+256) {
+						log.Printf("quota exceeded: ip=%s", ip)
+						conn.Close(websocket.StatusPolicyViolation, "quota exceeded")
+						return
+					}
+
+					pendingEvent := PendingEvent{
+						recipient:  m.To,
+						sender:     pubKey,
+						eventType:  EventDeleteMessage,
+						payload:    m.Payload,
+						request_id: requestId,
+						created_at: time.Now().Unix(),
+					}
+
+					err = hub.db.SavePendingEvent(pendingEvent)
+
+					if err != nil {
+						log.Printf("SavePendingEvent save pending event error: %s", err)
+						conn.Close(websocket.StatusInternalError, "internal error")
+						return 
+					}
+
+					err = hub.db.DeleteMessagesByClientIDs(
+						m.To,
+						pubKey,
+						payload.ClientMessageIDs,
+					)
+
+					if err != nil {
+						log.Printf("DeleteMessagesByClientIDs error: %s", err)
+						conn.Close(websocket.StatusInternalError, "internal error")
+						return
+					}
+
+					deleteMsgCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+					defer cancel()
+
+					serverRequestDeleteMessage, err := Encode(ServerEvent{
+						Type: SERVER_EVENT,
+						RequestID: requestId,
+						From: pubKey,
+						EventType: EventDeleteMessage,
+						Payload: m.Payload,
+					})
+
+					if err != nil {
+						log.Printf("ClientDeleteMessage encode error")
+						conn.Close(websocket.StatusInternalError, "internal error")
+						return
+					}
+
+					toKey := m.To
+
+					ok := hub.IsOnline(toKey)
+					if ok {
+						recipient, isFind := hub.getWsConnection(toKey)
+						if isFind {
+							recipient.Write(deleteMsgCtx, websocket.MessageText, serverRequestDeleteMessage)
+						}
+					}
+				case ClientEventAck:
+					if !limiter.Allow() {
+						conn.Close(websocket.StatusPolicyViolation, "rate limit exceeded")
+						return
+					}
+
+					if len(m.RequestID) != 32 {
+						conn.Close(websocket.StatusPolicyViolation, "invalid request id")
+						return
+					}
+
+					err := hub.db.DeletePendingEvent(m.RequestID, pubKey)
+					if err != nil {
+						log.Printf("DeletePendingEvent error: %s", err)
+						conn.Close(websocket.StatusInternalError, "internal error")
+						return
+					}
 				default:
 					conn.Close(websocket.StatusPolicyViolation, "unexpected message")
 					return
