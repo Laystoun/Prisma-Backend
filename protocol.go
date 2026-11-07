@@ -5,18 +5,25 @@ import (
 	"fmt"
 )
 
-const CLIENT_HELLO = "hello"
-const CLIENT_AUTH = "auth"
-const CLIENT_SEND = "send"
-const CLIENT_ACK = "ack"
-const CLIENT_PUSH_TOKEN = "push_token"
-const CLIENT_STATUS_REQUEST = "client_status_request"
+const (
+	CLIENT_HELLO = "hello"
+	CLIENT_AUTH = "auth"
+	CLIENT_SEND = "send"
+	CLIENT_ACK = "ack"
+	CLIENT_PUSH_TOKEN = "push_token"
+	CLIENT_STATUS_REQUEST = "client_status_request"
+	CLIENT_EVENT_ACK = "client_event_ack"
+	CLIENT_DELETE_MESSAGE = "client_deleted_message"
+)
 
-const SERVER_CHALLENGE = "challenge"
-const SERVER_OK = "ok"
-const SERVER_ERROR = "error"
-const SERVER_DELIVER = "deliver"
-const SERVER_STATUS_RESPONSE = "server_status_response"
+const (
+	SERVER_CHALLENGE = "challenge"
+	SERVER_OK = "ok"
+	SERVER_ERROR = "error"
+	SERVER_DELIVER = "deliver"
+	SERVER_STATUS_RESPONSE = "server_status_response"
+	SERVER_EVENT = "event"
+)
 
 type ClientHello struct { 
 	Type string 	`json:"type"`
@@ -29,10 +36,11 @@ type ClientAuth struct {
 }
 
 type ClientSend struct {
-	Type string 	`json:"type"`
-	To []byte 		`json:"to"`
-	Blob []byte 	`json:"blob"`
-	SendAt int64 	`json:"send_at"`
+	Type string 			`json:"type"`
+	To []byte 				`json:"to"`
+	Blob []byte 			`json:"blob"`
+	SendAt int64 			`json:"send_at"`
+	ClientMessageId string 	`json:"client_message_id"`
 }
 
 type ClientAck struct {
@@ -50,6 +58,18 @@ type ClientStatusRequest struct {
 	PubKey []byte 	`json:"pub_key"`
 }
 
+type ClientDeleteMessage struct {
+    Type    string          `json:"type"`
+    To      []byte          `json:"to"`
+    Payload json.RawMessage `json:"payload"`
+}
+
+type ClientEventAck struct {
+    Type      string `json:"type"`
+    RequestID string `json:"request_id"`
+}
+
+
 type ServerChallenge struct { 
 	Type string		`json:"type"`
 	Nonce []byte 	`json:"nonce"`
@@ -65,17 +85,31 @@ type ServerError struct {
 }
 
 type ServerDeliver struct {
-	Type string 		`json:"type"`
-	MessageId int64 	`json:"message_id"`
-	From []byte 		`json:"from"`
-	Blob []byte 		`json:"blob"`
-	SendAt int64 		`json:"send_at"`
+	Type string 			`json:"type"`
+	MessageId int64 		`json:"message_id"`
+	From []byte 			`json:"from"`
+	Blob []byte 			`json:"blob"`
+	SendAt int64 			`json:"send_at"`
+	ClientMessageId string 	`json:"client_message_id"`
 }
 
 type ServerStatusResponce struct {
 	Type string 	`json:"type"`
 	PubKey []byte 	`json:"pub_key"`
 	Status bool 	`json:"online"`
+}
+
+type ServerEvent struct {
+    Type      string          `json:"type"`
+    RequestID string          `json:"request_id"`
+    From      []byte          `json:"from"`
+    EventType string          `json:"event_type"`
+    Payload   json.RawMessage `json:"payload"`
+}
+
+
+type DeleteMessagePayload struct {
+    ClientMessageIDs []string `json:"client_message_ids"`
 }
 
 type MessageType struct {
@@ -129,6 +163,18 @@ func Decode(data []byte) (any, error) {
 				return nil, err
 			}
 			return clStatusRequest, nil
+		case CLIENT_DELETE_MESSAGE:
+			var clDeleteMessage ClientDeleteMessage
+			if err := json.Unmarshal(data, &clDeleteMessage); err != nil {
+				return nil, err
+			}
+			return clDeleteMessage, nil
+		case CLIENT_EVENT_ACK:
+			var clEventAck ClientEventAck
+			if err := json.Unmarshal(data, &clEventAck); err != nil {
+				return nil, err
+			}
+			return clEventAck, nil
 		default:
 			return nil, fmt.Errorf("unknown type: %s", msgType.Type)
 	}
